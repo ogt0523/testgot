@@ -9,28 +9,14 @@ async function fetchNovelContent(url) {
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
-    const content = doc.querySelector('.novel-content'); // 노벨피아의 콘텐츠 선택자로 변경
+    const content = doc.querySelector('#novel_content');
 
     if (!content) {
-        console.error(`Failed to find '.novel-content' on the page: ${url}`);
+        console.error(`Failed to find '#novel_content' on the page: ${url}`);
         return null;
     }
 
     return cleanText(content.innerHTML);
-}
-
-function cleanText(text) {
-    text = text.replace(/<div>/g, '');
-    text = text.replace(/<\/div>/g, '');
-    text = text.replace(/<p>/g, '\n');
-    text = text.replace(/<\/p>/g, '\n');
-    text = text.replace(/<br\s*[/]?>/g, '\n');
-    text = text.replace(/<[^>]*>/g, '');
-    text = text.replace(/ {2,}/g, ' ');
-    text = text.replace(/\n{2,}/g, '\n\n');
-    text = unescapeHTML(text);
-
-    return text;
 }
 
 function unescapeHTML(text) {
@@ -45,6 +31,20 @@ function unescapeHTML(text) {
         const regex = new RegExp(entity, 'g');
         text = text.replace(regex, replacement);
     });
+
+    return text;
+}
+
+function cleanText(text) {
+    text = text.replace(/<div>/g, '');
+    text = text.replace(/<\/div>/g, '');
+    text = text.replace(/<p>/g, '\n');
+    text = text.replace(/<\/p>/g, '\n');
+    text = text.replace(/<br\s*[/]?>/g, '\n');
+    text = text.replace(/<[^>]*>/g, '');
+    text = text.replace(/ {2,}/g, ' ');
+    text = text.replace(/\n{2,}/g, '\n\n');
+    text = unescapeHTML(text);
 
     return text;
 }
@@ -77,7 +77,7 @@ function createModal() {
 }
 
 async function downloadNovel(title, episodeLinks, startEpisode) {
-    let novelText = `${title}\n\nDownloaded with novel-dl,\nhttps://github.com/yeorinhieut/novel-dl\n`;
+    let novelText = `${title}\n\n`;
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const {modal, modalContent} = createModal();
     document.body.appendChild(modal);
@@ -100,7 +100,7 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
     for (let i = startingIndex; i >= 0; i--) {
         const episodeUrl = episodeLinks[i];
 
-        if (!episodeUrl.startsWith('https://novelpia.com')) { // 노벨피아 URL 확인
+        if (!episodeUrl.startsWith('https://booktoki')) {
             console.log(`Skipping invalid episode link: ${episodeUrl}`);
             continue;
         }
@@ -112,8 +112,26 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
 
         if (!episodeContent) {
             console.error(`Failed to fetch content for episode: ${episodeUrl}`);
-            // CAPTCHA 처리 로직 추가 가능
-            continue;
+
+            // Ask the user to solve the CAPTCHA
+            const userConfirmed = await new Promise(resolve => {
+                const confirmResult = confirm(`이 페이지에 캡챠가 발견되었습니다.
+${episodeUrl}.
+새 탭에서 해당 페이지에 접속하여 캡챠를 풀고, 확인을 눌러주세요.`);
+                resolve(confirmResult);
+            });
+
+            if (userConfirmed) {
+                // Retry fetching the content
+                episodeContent = await fetchNovelContent(episodeUrl);
+                if (!episodeContent) {
+                    console.error(`Failed to fetch content for episode after CAPTCHA: ${episodeUrl}`);
+                    continue;  // Skip this episode if it still fails
+                }
+            } else {
+                console.log("User cancelled. Skipping this episode.");
+                continue;
+            }
         }
 
         novelText += episodeContent;
@@ -143,13 +161,13 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
 }
 
 function extractTitle() {
-    const titleElement = document.querySelector('.novel-title'); // 노벨피아의 제목 선택자로 변경
+    const titleElement = document.evaluate('//*[@id="content_wrapper"]/div[1]/span', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     return titleElement ? titleElement.textContent.trim() : null;
 }
 
 function extractEpisodeLinks() {
     const episodeLinks = [];
-    const links = document.querySelectorAll('.episode-link'); // 노벨피아의 에피소드 링크 선택자로 변경
+    const links = document.querySelectorAll('.item-subject');
 
     links.forEach(link => {
         const episodeLink = link.getAttribute('href');
@@ -172,7 +190,7 @@ async function fetchPage(url) {
 }
 
 async function runCrawler() {
-    const novelPageRule = 'https://novelpia.com';
+    const novelPageRule = 'https://booktoki';
     let currentUrl = window.location.href;
 
     // Clean URL
@@ -191,7 +209,8 @@ async function runCrawler() {
         return;
     }
 
-    const totalPages = prompt(`소설 목록의 페이지 수를 입력하세요.`, '1');
+    const totalPages = prompt(`소설 목록의 페이지 수를 입력하세요.
+(1000화가 넘지 않는 경우 1, 1000화 이상부터 2~)`, '1');
 
     if (!totalPages || isNaN(totalPages)) {
         console.log('Invalid page number or user canceled the input.');
@@ -205,7 +224,7 @@ async function runCrawler() {
         const nextPageUrl = `${currentUrl}?spage=${page}`;
         const nextPageDoc = await fetchPage(nextPageUrl);
         if (nextPageDoc) {
-            const nextPageLinks = Array.from(nextPageDoc.querySelectorAll('.episode-link')).map(link => link.getAttribute('href'));
+            const nextPageLinks = Array.from(nextPageDoc.querySelectorAll('.item-subject')).map(link => link.getAttribute('href'));
             allEpisodeLinks.push(...nextPageLinks);
         }
     }
@@ -230,4 +249,3 @@ async function runCrawler() {
 }
 
 runCrawler();
-``
